@@ -7,6 +7,7 @@ type Vec2 struct {
 	Y float64
 }
 
+
 type Input struct {
 	Up    bool
 	Down  bool
@@ -89,9 +90,9 @@ func (w *World) Update(dt float64) {
 	if dt <= 0 {
 		return
 	}
-	dx := 0.0
-	dy := 0.0
 	for _, player := range w.players {
+		dx := 0.0
+		dy := 0.0
 		if player.Input.Up {
 			dy--
 		}
