@@ -12,12 +12,21 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/miguelsndc/multiplayer-server/game"
 	"github.com/miguelsndc/multiplayer-server/room"
 )
 
 type welcomeMessage struct {
 	Type     string `json:"type"`
 	PlayerID string `json:"player_id"`
+}
+
+type inputMessage struct {
+	Type  string `json:"type"`
+	Up    bool   `json:"up"`
+	Down  bool   `json:"down"`
+	Left  bool   `json:"left"`
+	Right bool   `json:"right"`
 }
 
 var nextPlayerID atomic.Uint64
@@ -78,8 +87,8 @@ func handleWebSocket(gameRoom *room.Room) http.HandlerFunc {
 		}()
 
 		for {
-			_, message, err := conn.Read(ctx)
-			if err != nil {
+			var message inputMessage
+			if err := wsjson.Read(ctx, conn, &message); err != nil {
 				log.Printf(
 					"websocket reader for %s stopped: %v",
 					playerID,
@@ -88,11 +97,23 @@ func handleWebSocket(gameRoom *room.Room) http.HandlerFunc {
 				return
 			}
 
-			log.Printf(
-				"received from %s: %s",
-				playerID,
-				message,
-			)
+			if message.Type != "input" {
+				continue
+			}
+			input := game.Input{
+				Up:    message.Up,
+				Down:  message.Down,
+				Left:  message.Left,
+				Right: message.Right,
+			}
+			if err := gameRoom.SetInput(ctx, playerID, input); err != nil {
+				log.Printf(
+					"failed to set input for %s: %v",
+					playerID,
+					err,
+				)
+				return
+			}
 		}
 	}
 }
