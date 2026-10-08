@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+
 	"github.com/miguelsndc/multiplayer-server/server"
 )
 

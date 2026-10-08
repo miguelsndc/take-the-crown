@@ -17,19 +17,27 @@ import (
 )
 
 type welcomeMessage struct {
-	Type     string `json:"type"`
-	PlayerID string `json:"player_id"`
+	Type        string  `json:"type"`
+	PlayerID    string  `json:"player_id"`
+	WorldWidth  float64 `json:"world_width"`
+	WorldHeight float64 `json:"world_height"`
 }
 
-type inputMessage struct {
+type clientMessage struct {
 	Type  string `json:"type"`
 	Up    bool   `json:"up"`
 	Down  bool   `json:"down"`
 	Left  bool   `json:"left"`
 	Right bool   `json:"right"`
+	Slot  int    `json:"slot"`
 }
 
 var nextPlayerID atomic.Uint64
+
+const (
+	worldWidth  = 3840.0
+	worldHeight = 2160.0
+)
 
 func handleWebSocket(gameRoom *room.Room) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -65,8 +73,10 @@ func handleWebSocket(gameRoom *room.Room) http.HandlerFunc {
 		}()
 
 		welcome := welcomeMessage{
-			Type:     "welcome",
-			PlayerID: playerID,
+			Type:        "welcome",
+			PlayerID:    playerID,
+			WorldWidth:  worldWidth,
+			WorldHeight: worldHeight,
 		}
 
 		if err := wsjson.Write(ctx, conn, welcome); err != nil {
@@ -81,13 +91,12 @@ func handleWebSocket(gameRoom *room.Room) http.HandlerFunc {
 					playerID,
 					err,
 				)
-
-				cancel()
 			}
+			cancel()
 		}()
 
 		for {
-			var message inputMessage
+			var message clientMessage
 			if err := wsjson.Read(ctx, conn, &message); err != nil {
 				log.Printf(
 					"websocket reader for %s stopped: %v",
@@ -97,22 +106,23 @@ func handleWebSocket(gameRoom *room.Room) http.HandlerFunc {
 				return
 			}
 
-			if message.Type != "input" {
-				continue
-			}
-			input := game.Input{
-				Up:    message.Up,
-				Down:  message.Down,
-				Left:  message.Left,
-				Right: message.Right,
-			}
-			if err := gameRoom.SetInput(ctx, playerID, input); err != nil {
-				log.Printf(
-					"failed to set input for %s: %v",
-					playerID,
-					err,
-				)
-				return
+			switch message.Type {
+			case "input":
+				input := game.Input{
+					Up:    message.Up,
+					Down:  message.Down,
+					Left:  message.Left,
+					Right: message.Right,
+				}
+				if err := gameRoom.SetInput(ctx, playerID, input); err != nil {
+					log.Printf("failed to set input for %s: %v", playerID, err)
+					return
+				}
+			case "use_item":
+				if err := gameRoom.UseItem(ctx, playerID, message.Slot); err != nil {
+					log.Printf("failed to use item for %s: %v", playerID, err)
+					return
+				}
 			}
 		}
 	}
@@ -141,7 +151,7 @@ func generateID() string {
 func Run() error {
 	roomCtx, cancelRoom := context.WithCancel(context.Background())
 	defer cancelRoom()
-	gameRoom := room.NewRoom(1000, 600, 30)
+	gameRoom := room.NewRoom(worldWidth, worldHeight, 30)
 	go gameRoom.Run(roomCtx)
 	const (
 		port = 3000

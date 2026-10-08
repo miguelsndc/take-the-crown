@@ -13,18 +13,29 @@ const (
 	joinEvent eventType = iota
 	leaveEvent
 	inputEvent
+	useItemEvent
 )
 
 type PlayerSnapshot struct {
-	ID string  `json:"id"`
-	X  float64 `json:"x"`
-	Y  float64 `json:"y"`
+	ID          string    `json:"id"`
+	X           float64   `json:"x"`
+	Y           float64   `json:"y"`
+	CrownTime   float64   `json:"crown_time"`
+	Inventory   [2]string `json:"inventory"`
+	SpeedActive bool      `json:"speed_active"`
+	GhostActive bool      `json:"ghost_active"`
 }
 
 type Snapshot struct {
-	Type    string           `json:"type"`
-	Tick    uint64           `json:"tick"`
-	Players []PlayerSnapshot `json:"players"`
+	Type             string             `json:"type"`
+	Tick             uint64             `json:"tick"`
+	Players          []PlayerSnapshot   `json:"players"`
+	Crown            game.CrownSnapshot `json:"crown"`
+	Pickups          []game.Pickup       `json:"pickups"`
+	Status           string              `json:"status"`
+	WinnerID         string              `json:"winner_id"`
+	RestartRemaining float64             `json:"restart_remaining"`
+	TargetTime       float64             `json:"target_time"`
 }
 
 type Client struct {
@@ -64,6 +75,7 @@ type event struct {
 	playerID string
 	client   *Client
 	input    game.Input
+	slot     int
 }
 
 type Room struct {
@@ -93,15 +105,25 @@ func (r *Room) broadcast() {
 	players := make([]PlayerSnapshot, 0, len(worldSnapshot.Players))
 	for _, player := range worldSnapshot.Players {
 		players = append(players, PlayerSnapshot{
-			ID: player.ID,
-			X:  player.Position.X,
-			Y:  player.Position.Y,
+			ID:          player.ID,
+			X:           player.Position.X,
+			Y:           player.Position.Y,
+			CrownTime:   player.CrownTime,
+			Inventory:   player.Inventory,
+			SpeedActive: player.SpeedRemaining > 0,
+			GhostActive: player.GhostRemaining > 0,
 		})
 	}
 	snapshot := Snapshot{
-		Type:    "snapshot",
-		Tick:    r.tick,
-		Players: players,
+		Type:             "snapshot",
+		Tick:             r.tick,
+		Players:          players,
+		Crown:            worldSnapshot.Crown,
+		Pickups:          worldSnapshot.Pickups,
+		Status:           worldSnapshot.Status,
+		WinnerID:         worldSnapshot.WinnerID,
+		RestartRemaining: worldSnapshot.RestartRemaining,
+		TargetTime:       worldSnapshot.TargetTime,
 	}
 	for _, client := range r.clients {
 		client.offer(snapshot)
@@ -142,6 +164,14 @@ func (r *Room) SetInput(
 	})
 }
 
+func (r *Room) UseItem(ctx context.Context, playerID string, slot int) error {
+	return r.send(ctx, event{
+		kind:     useItemEvent,
+		playerID: playerID,
+		slot:     slot,
+	})
+}
+
 func (r *Room) send(ctx context.Context, e event) error {
 	select {
 	case r.events <- e:
@@ -174,6 +204,8 @@ func (r *Room) handle(e event) {
 		r.removeClient(e.playerID)
 	case inputEvent:
 		r.world.SetInput(e.playerID, e.input)
+	case useItemEvent:
+		r.world.UseItem(e.playerID, e.slot)
 	}
 }
 
