@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"sync/atomic"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -37,9 +36,10 @@ var nextPlayerID atomic.Uint64
 const (
 	worldWidth  = 3840.0
 	worldHeight = 2160.0
+	tickRate    = 30
 )
 
-func handleWebSocket(gameRoom *room.Room) http.HandlerFunc {
+func handleWebSocket(manager *roomManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -55,19 +55,14 @@ func handleWebSocket(gameRoom *room.Room) http.HandlerFunc {
 		playerID := generateID()
 		client := room.NewClient(playerID)
 
-		if err := gameRoom.Join(ctx, client); err != nil {
+		gameRoom, leaveRoom, err := manager.join(ctx, client)
+		if err != nil {
 			log.Printf("failed to join room: %v", err)
 			return
 		}
 
 		defer func() {
-			leaveCtx, leaveCancel := context.WithTimeout(
-				context.Background(),
-				time.Second,
-			)
-			defer leaveCancel()
-
-			if err := gameRoom.Leave(leaveCtx, playerID); err != nil {
+			if err := leaveRoom(); err != nil {
 				log.Printf("failed to leave room: %v", err)
 			}
 		}()
@@ -151,13 +146,12 @@ func generateID() string {
 func Run() error {
 	roomCtx, cancelRoom := context.WithCancel(context.Background())
 	defer cancelRoom()
-	gameRoom := room.NewRoom(worldWidth, worldHeight, 30)
-	go gameRoom.Run(roomCtx)
+	manager := newRoomManager(roomCtx)
 	const (
 		port = 3000
 	)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", handleWebSocket(gameRoom))
+	mux.HandleFunc("/ws", handleWebSocket(manager))
 	fileServer := http.FileServer(http.Dir("./web"))
 	mux.Handle("/", fileServer)
 	actualPort := ":" + strconv.Itoa(port)
